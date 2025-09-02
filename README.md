@@ -27,6 +27,7 @@ chmod +x install.sh
 # Clone the repository
 git clone https://github.com/funterminal/FireWiki.git
 cd FireWiki
+cd src
 
 # Run directly (no dependencies required)
 python3 firewiki.py

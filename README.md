@@ -2,8 +2,6 @@
 
 A sophisticated, feature-rich terminal-based wiki and knowledge management system designed for developers, writers, and organized thinkers who prefer the power and efficiency of the command line.
 
-https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-0078D6?logo=terminal&logoColor=white https://img.shields.io/badge/License-MIT-4DAF7C?logo=opensourceinitiative&logoColor=white https://img.shields.io/badge/Version-1.1.0-FF6B6B https://img.shields.io/badge/Code%20Quality-Production%20Ready-27AE60
-
 # ✨ Overview
 
 FireWiki revolutionizes knowledge management by bringing the power of modern wiki systems to your terminal. With robust community management, advanced macro capabilities, comprehensive version control, tagging system, and beautiful ANSI-rendered content, it combines the efficiency of command-line tools with the organizational power of wiki systems.

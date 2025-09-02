@@ -4,6 +4,7 @@ import shutil
 import json
 import hashlib
 from datetime import datetime
+import readchar
 
 macros = {
     'hello': lambda: print("Hello from macro!"),
@@ -59,19 +60,53 @@ def list_pages(comm):
 def render_markdown(content):
     lines = content.split('\n')
     rendered = []
+    in_code_block = False
+    in_list = False
+    
     for line in lines:
+        # Handle code blocks
+        if line.strip().startswith('```'):
+            in_code_block = not in_code_block
+            if in_code_block:
+                rendered.append(ansi(line, '0;37;40'))  # White on black for code blocks
+            else:
+                rendered.append(ansi(line, '0;37;40'))
+            continue
+        
+        if in_code_block:
+            rendered.append(ansi(line, '0;37;40'))
+            continue
+            
+        # Handle headers
         if line.startswith('# '):
-            rendered.append(ansi(line[2:], '1;34'))
+            rendered.append(ansi(line[2:], '1;34'))  # Bold blue for H1
         elif line.startswith('## '):
-            rendered.append(ansi(line[3:], '1;36'))
+            rendered.append(ansi(line[3:], '1;36'))  # Bold cyan for H2
         elif line.startswith('### '):
-            rendered.append(ansi(line[4:], '1;32'))
-        elif line.startswith('- '):
-            rendered.append(ansi('• ' + line[2:], '0;33'))
+            rendered.append(ansi(line[4:], '1;32'))  # Bold green for H3
+        # Handle lists
+        elif line.startswith('- ') or line.startswith('* '):
+            if not in_list:
+                in_list = True
+            bullet = '• ' if line.startswith('- ') else '◦ '
+            rendered.append(ansi(bullet + line[2:], '0;33'))  # Yellow for list items
         elif line.startswith('> '):
-            rendered.append(ansi(line, '0;35'))
-        elif line.startswith('`') and line.endswith('`'):
-            rendered.append(ansi(line[1:-1], '0;37'))
+            rendered.append(ansi(line, '0;35'))  # Magenta for blockquotes
+        # Handle inline code
+        elif '`' in line:
+            parts = line.split('`')
+            for i, part in enumerate(parts):
+                if i % 2 == 1:  # Odd parts are inside backticks
+                    rendered_part = ansi(part, '0;37;40')  # White on black for inline code
+                else:
+                    # Handle bold and italic in text
+                    part = part.replace('**', '\033[1m').replace('*', '\033[3m') + '\033[0m'
+                    rendered_part = part
+                if i > 0:
+                    rendered[-1] += rendered_part
+                else:
+                    rendered.append(rendered_part)
+        # Handle macros and special tags
         elif line.startswith('@macro '):
             macro_name = line[7:].strip()
             rendered.append(ansi(f'[Macro: {macro_name}]', '1;35'))
@@ -81,39 +116,47 @@ def render_markdown(content):
             rendered.append(ansi(f'[Edit Macro: {line[8:]}]', '1;36'))
         elif line.startswith('#tag '):
             rendered.append(ansi(f'[Tag: {line[5:]}]', '1;33'))
+        # Handle horizontal rules
+        elif line.strip() in ('---', '***', '___'):
+            rendered.append(ansi('─' * 40, '0;36'))  # Cyan horizontal rule
+        # Handle regular text with formatting
         else:
-            tmp = line.replace('**', '\033[1m').replace('*', '\033[3m') + '\033[0m'
-            rendered.append(tmp)
+            if line.strip() == '' and in_list:
+                in_list = False
+            # Handle bold and italic text
+            formatted_line = line.replace('**', '\033[1m').replace('*', '\033[3m') + '\033[0m'
+            rendered.append(formatted_line)
+    
     return '\n'.join(rendered)
 
 def create_version(comm, page_file, content, operation):
     version_dir = os.path.join(comm, '_versions', page_file)
     if not os.path.exists(version_dir):
         os.makedirs(version_dir)
-    
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
     version_file = os.path.join(version_dir, f"{timestamp}_{content_hash}_{operation}.md")
-    
+
     with open(version_file, 'w') as f:
         f.write(content)
-    
+
     version_log = os.path.join(comm, '_versions', '_version_log.json')
     if os.path.exists(version_log):
         log_data = json.load(open(version_log))
     else:
         log_data = {}
-    
+
     if page_file not in log_data:
         log_data[page_file] = []
-    
+
     log_data[page_file].append({
         'timestamp': timestamp,
         'hash': content_hash,
         'operation': operation,
         'version_file': f"{timestamp}_{content_hash}_{operation}.md"
     })
-    
+
     with open(version_log, 'w') as f:
         json.dump(log_data, f, indent=2)
 
@@ -125,14 +168,14 @@ def get_page_info(comm, page_file):
         'modified': datetime.fromtimestamp(os.path.getmtime(os.path.join(comm, page_file))).strftime("%Y-%m-%d %H:%M:%S"),
         'versions': 0
     }
-    
+
     version_log = os.path.join(comm, '_versions', '_version_log.json')
     if os.path.exists(version_log):
         log_data = json.load(open(version_log))
         if page_file in log_data:
             info['versions'] = len(log_data[page_file])
             info['last_version'] = log_data[page_file][-1]['timestamp'] if log_data[page_file] else 'None'
-    
+
     return info
 
 def show_page_info(comm, page_file):
@@ -150,12 +193,12 @@ def view_version_history(comm, page_file):
     if not os.path.exists(version_log):
         print("No version history available.")
         return
-    
+
     log_data = json.load(open(version_log))
     if page_file not in log_data or not log_data[page_file]:
         print("No version history for this page.")
         return
-    
+
     print(f"\nVersion History for {page_file}:")
     for i, version in enumerate(reversed(log_data[page_file])):
         print(f"{i+1}. {version['timestamp']} - {version['operation']} - Hash: {version['hash']}")
@@ -165,30 +208,30 @@ def restore_version(comm, page_file):
     if not os.path.exists(version_log):
         print("No version history available.")
         return
-    
+
     log_data = json.load(open(version_log))
     if page_file not in log_data or not log_data[page_file]:
         print("No version history for this page.")
         return
-    
+
     view_version_history(comm, page_file)
     try:
         choice = int(input("\nSelect version to restore (number): "))
         if choice < 1 or choice > len(log_data[page_file]):
             print("Invalid selection.")
             return
-        
+
         version = list(reversed(log_data[page_file]))[choice-1]
         version_path = os.path.join(comm, '_versions', page_file, version['version_file'])
-        
+
         if os.path.exists(version_path):
             with open(version_path, 'r') as f:
                 content = f.read()
-            
+
             current_path = os.path.join(comm, page_file)
             with open(current_path, 'w') as f:
                 f.write(content)
-            
+
             create_version(comm, page_file, content, 'restored')
             print(f"Version {version['timestamp']} restored successfully.")
         else:
@@ -246,22 +289,22 @@ def rename_page(comm):
         print("Page not found")
         return
     new_name = input('New page name (with .md): ').strip()
-    
+
     old_path = os.path.join(comm, old_name)
     new_path = os.path.join(comm, new_name)
-    
+
     if os.path.exists(old_path):
         with open(old_path, 'r') as f:
             content = f.read()
         create_version(comm, old_name, content, 'rename_old')
-    
+
     os.rename(old_path, new_path)
-    
+
     if os.path.exists(new_path):
         with open(new_path, 'r') as f:
             content = f.read()
         create_version(comm, new_name, content, 'rename_new')
-    
+
     print('Page renamed.')
 
 def edit_page(comm):
@@ -323,7 +366,7 @@ def replay_macro(comm, macro_name, page_file):
             content = f.read()
         lines = content.split('\n')
         create_version(comm, page_file, content, 'macro_pre')
-    
+
     for cmd in edit_macros[macro_name]:
         if cmd.startswith(':insert '):
             lines.append(cmd[8:].strip())
@@ -343,7 +386,7 @@ def replay_macro(comm, macro_name, page_file):
                         lines[idx] = parts[1]
                 except:
                     continue
-    
+
     new_content = '\n'.join(lines)
     with open(path, 'w') as f:
         f.write(new_content)
@@ -414,101 +457,92 @@ def manage_community():
             return
         idx = names.index(choice)
     comm = communities[idx]
-    while True:
-        print('1. Edit Page\n2. Rename Page\n3. View Page\n4. Page Information\n5. Version History\n6. Restore Version\n7. Replay Macro\n8. Export POSIX\n9. Back')
-        cmd = input('> ')
-        if cmd == '1':
-            edit_page(comm)
-        elif cmd == '2':
-            rename_page(comm)
-        elif cmd == '3':
-            view_page(comm)
-        elif cmd == '4':
-            pages = list_pages(comm)
-            if not pages:
-                print("No pages available.")
-                continue
-            for i, p in enumerate(pages):
-                print(f'{i+1}. {p}')
-            choice = input("Select page for information: ").strip()
-            if choice.isdigit() and int(choice)-1 < len(pages):
-                page_file = pages[int(choice)-1]
-            elif choice in pages:
-                page_file = choice
-            else:
-                print("Page not found")
-                continue
-            show_page_info(comm, page_file)
-        elif cmd == '5':
-            pages = list_pages(comm)
-            if not pages:
-                print("No pages available.")
-                continue
-            for i, p in enumerate(pages):
-                print(f'{i+1}. {p}')
-            choice = input("Select page for version history: ").strip()
-            if choice.isdigit() and int(choice)-1 < len(pages):
-                page_file = pages[int(choice)-1]
-            elif choice in pages:
-                page_file = choice
-            else:
-                print("Page not found")
-                continue
-            view_version_history(comm, page_file)
-        elif cmd == '6':
-            pages = list_pages(comm)
-            if not pages:
-                print("No pages available.")
-                continue
-            for i, p in enumerate(pages):
-                print(f'{i+1}. {p}')
-            choice = input("Select page to restore version: ").strip()
-            if choice.isdigit() and int(choice)-1 < len(pages):
-                page_file = pages[int(choice)-1]
-            elif choice in pages:
-                page_file = choice
-            else:
-                print("Page not found")
-                continue
-            restore_version(comm, page_file)
-        elif cmd == '7':
-            pages = list_pages(comm)
-            if not pages:
-                print("No pages to apply macro.")
-                continue
-            for i, p in enumerate(pages):
-                print(f'{i+1}. {p}')
-            page_choice = input("Select page for macro: ").strip()
-            if page_choice.isdigit() and int(page_choice)-1 < len(pages):
-                page_file = pages[int(page_choice)-1]
-            elif page_choice in pages:
-                page_file = page_choice
-            else:
-                print("Page not found")
-                continue
-            macro_name = input("Enter macro name to replay: ").strip()
-            replay_macro(comm, macro_name, page_file)
-        elif cmd == '8':
-            export_posix(comm)
-        elif cmd == '9':
-            break
-
-def main():
+    
+    # Vim-style navigation for community management
+    print("\nVim-style navigation: j/k to navigate, Enter to select, q to go back")
+    options = [
+        "Edit Page (e)",
+        "Rename Page (r)",
+        "View Page (v)",
+        "Page Information (i)",
+        "Version History (h)",
+        "Restore Version (R)",
+        "Replay Macro (m)",
+        "Export POSIX (x)",
+        "Back (q)"
+    ]
+    
+    current_selection = 0
     while True:
         clear()
-        print(ansi('FireWiki Terminal', '1;31'))
-        print('1. Create Community\n2. Delete Community\n3. Rename Community\n4. Manage Community\n5. Exit')
-        choice = input('> ')
-        if choice == '1':
-            create_community()
-        elif choice == '2':
-            delete_community()
-        elif choice == '3':
-            rename_community()
-        elif choice == '4':
-            manage_community()
-        elif choice == '5':
-            sys.exit()
-
-if __name__ == '__main__':
-    main()
+        print(f"Managing Community: {comm[1:]}")
+        print("Select an option:")
+        for i, option in enumerate(options):
+            prefix = "> " if i == current_selection else "  "
+            print(f"{prefix}{option}")
+        
+        key = readchar.readkey()
+        
+        if key == 'j' or key == '\x1b[B':  # Down arrow or j
+            current_selection = min(current_selection + 1, len(options) - 1)
+        elif key == 'k' or key == '\x1b[A':  # Up arrow or k
+            current_selection = max(current_selection - 1, 0)
+        elif key == '\r' or key == '\n':  # Enter
+            if current_selection == 0:  # Edit Page
+                edit_page(comm)
+                input("Press any key to continue...")
+            elif current_selection == 1:  # Rename Page
+                rename_page(comm)
+                input("Press any key to continue...")
+            elif current_selection == 2:  # View Page
+                view_page(comm)
+                input("Press any key to continue...")
+            elif current_selection == 3:  # Page Information
+                pages = list_pages(comm)
+                if not pages:
+                    print("No pages available.")
+                    input("Press any key to continue...")
+                    continue
+                
+                # Vim-style page selection
+                page_selection = 0
+                while True:
+                    clear()
+                    print("Select a page for information:")
+                    for i, p in enumerate(pages):
+                        prefix = "> " if i == page_selection else "  "
+                        print(f"{prefix}{i+1}. {p}")
+                    print("\nNavigation: j/k to navigate, Enter to select, q to go back")
+                    
+                    key2 = readchar.readkey()
+                    if key2 == 'j' or key2 == '\x1b[B':
+                        page_selection = min(page_selection + 1, len(pages) - 1)
+                    elif key2 == 'k' or key2 == '\x1b[A':
+                        page_selection = max(page_selection - 1, 0)
+                    elif key2 == '\r' or key2 == '\n':
+                        page_file = pages[page_selection]
+                        show_page_info(comm, page_file)
+                        input("Press any key to continue...")
+                        break
+                    elif key2 == 'q':
+                        break
+            elif current_selection == 4:  # Version History
+                pages = list_pages(comm)
+                if not pages:
+                    print("No pages available.")
+                    input("Press any key to continue...")
+                    continue
+                
+                # Vim-style page selection
+                page_selection = 0
+                while True:
+                    clear()
+                    print("Select a page for version history:")
+                    for i, p in enumerate(pages):
+                        prefix = "> " if i == page_selection else "  "
+                        print(f"{prefix}{i+1}. {p}")
+                    print("\nNavigation: j/k to navigate, Enter to select, q to go back")
+                    
+                    key2 = readchar.readkey()
+                    if key2 == 'j' or key2 == '\x1b[B':
+                        page_selection = min(page_selection +

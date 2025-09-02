@@ -2,6 +2,8 @@ import os
 import sys
 import shutil
 import json
+import hashlib
+from datetime import datetime
 
 macros = {
     'hello': lambda: print("Hello from macro!"),
@@ -28,6 +30,8 @@ def save_community_metadata(name, genre, desc, age):
     macro_file = os.path.join(folder, '_edit_macros.json')
     if not os.path.exists(macro_file):
         json.dump({}, open(macro_file, 'w'))
+    if not os.path.exists(os.path.join(folder, '_versions')):
+        os.mkdir(os.path.join(folder, '_versions'))
 
 def load_communities():
     return [d for d in os.listdir() if os.path.isdir(d) and d.startswith('.')]
@@ -50,7 +54,7 @@ def save_edit_macros(comm, data):
         json.dump(data, f)
 
 def list_pages(comm):
-    return [f for f in os.listdir(comm) if f.endswith('.md')]
+    return [f for f in os.listdir(comm) if f.endswith('.md') and not f.startswith('_')]
 
 def render_markdown(content):
     lines = content.split('\n')
@@ -81,6 +85,116 @@ def render_markdown(content):
             tmp = line.replace('**', '\033[1m').replace('*', '\033[3m') + '\033[0m'
             rendered.append(tmp)
     return '\n'.join(rendered)
+
+def create_version(comm, page_file, content, operation):
+    version_dir = os.path.join(comm, '_versions', page_file)
+    if not os.path.exists(version_dir):
+        os.makedirs(version_dir)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+    version_file = os.path.join(version_dir, f"{timestamp}_{content_hash}_{operation}.md")
+    
+    with open(version_file, 'w') as f:
+        f.write(content)
+    
+    version_log = os.path.join(comm, '_versions', '_version_log.json')
+    if os.path.exists(version_log):
+        log_data = json.load(open(version_log))
+    else:
+        log_data = {}
+    
+    if page_file not in log_data:
+        log_data[page_file] = []
+    
+    log_data[page_file].append({
+        'timestamp': timestamp,
+        'hash': content_hash,
+        'operation': operation,
+        'version_file': f"{timestamp}_{content_hash}_{operation}.md"
+    })
+    
+    with open(version_log, 'w') as f:
+        json.dump(log_data, f, indent=2)
+
+def get_page_info(comm, page_file):
+    info = {
+        'name': page_file,
+        'size': os.path.getsize(os.path.join(comm, page_file)),
+        'created': datetime.fromtimestamp(os.path.getctime(os.path.join(comm, page_file))).strftime("%Y-%m-%d %H:%M:%S"),
+        'modified': datetime.fromtimestamp(os.path.getmtime(os.path.join(comm, page_file))).strftime("%Y-%m-%d %H:%M:%S"),
+        'versions': 0
+    }
+    
+    version_log = os.path.join(comm, '_versions', '_version_log.json')
+    if os.path.exists(version_log):
+        log_data = json.load(open(version_log))
+        if page_file in log_data:
+            info['versions'] = len(log_data[page_file])
+            info['last_version'] = log_data[page_file][-1]['timestamp'] if log_data[page_file] else 'None'
+    
+    return info
+
+def show_page_info(comm, page_file):
+    info = get_page_info(comm, page_file)
+    print(f"\nPage Information: {info['name']}")
+    print(f"Size: {info['size']} bytes")
+    print(f"Created: {info['created']}")
+    print(f"Last Modified: {info['modified']}")
+    print(f"Version History: {info['versions']} saved versions")
+    if info['versions'] > 0:
+        print(f"Last Version: {info['last_version']}")
+
+def view_version_history(comm, page_file):
+    version_log = os.path.join(comm, '_versions', '_version_log.json')
+    if not os.path.exists(version_log):
+        print("No version history available.")
+        return
+    
+    log_data = json.load(open(version_log))
+    if page_file not in log_data or not log_data[page_file]:
+        print("No version history for this page.")
+        return
+    
+    print(f"\nVersion History for {page_file}:")
+    for i, version in enumerate(reversed(log_data[page_file])):
+        print(f"{i+1}. {version['timestamp']} - {version['operation']} - Hash: {version['hash']}")
+
+def restore_version(comm, page_file):
+    version_log = os.path.join(comm, '_versions', '_version_log.json')
+    if not os.path.exists(version_log):
+        print("No version history available.")
+        return
+    
+    log_data = json.load(open(version_log))
+    if page_file not in log_data or not log_data[page_file]:
+        print("No version history for this page.")
+        return
+    
+    view_version_history(comm, page_file)
+    try:
+        choice = int(input("\nSelect version to restore (number): "))
+        if choice < 1 or choice > len(log_data[page_file]):
+            print("Invalid selection.")
+            return
+        
+        version = list(reversed(log_data[page_file]))[choice-1]
+        version_path = os.path.join(comm, '_versions', page_file, version['version_file'])
+        
+        if os.path.exists(version_path):
+            with open(version_path, 'r') as f:
+                content = f.read()
+            
+            current_path = os.path.join(comm, page_file)
+            with open(current_path, 'w') as f:
+                f.write(content)
+            
+            create_version(comm, page_file, content, 'restored')
+            print(f"Version {version['timestamp']} restored successfully.")
+        else:
+            print("Version file not found.")
+    except ValueError:
+        print("Invalid input.")
 
 def create_community():
     name = input('Community Name: ').strip()
@@ -132,7 +246,22 @@ def rename_page(comm):
         print("Page not found")
         return
     new_name = input('New page name (with .md): ').strip()
-    os.rename(os.path.join(comm, old_name), os.path.join(comm, new_name))
+    
+    old_path = os.path.join(comm, old_name)
+    new_path = os.path.join(comm, new_name)
+    
+    if os.path.exists(old_path):
+        with open(old_path, 'r') as f:
+            content = f.read()
+        create_version(comm, old_name, content, 'rename_old')
+    
+    os.rename(old_path, new_path)
+    
+    if os.path.exists(new_path):
+        with open(new_path, 'r') as f:
+            content = f.read()
+        create_version(comm, new_name, content, 'rename_new')
+    
     print('Page renamed.')
 
 def edit_page(comm):
@@ -150,6 +279,7 @@ def edit_page(comm):
     if os.path.exists(path):
         with open(path) as f:
             content = f.read()
+        create_version(comm, filename, content, 'edit_pre')
     print('--- Current Content ---')
     print(render_markdown(content))
     print('--- Enter new content or macro commands (end with ---) ---')
@@ -174,8 +304,10 @@ def edit_page(comm):
             edit_macros[macro_name].append(line)
             continue
         new_lines.append(line)
+    new_content = '\n'.join(new_lines)
     with open(path, 'w') as f:
-        f.write('\n'.join(new_lines))
+        f.write(new_content)
+    create_version(comm, filename, new_content, 'edit_post')
     save_edit_macros(comm, edit_macros)
     print('Saved.')
 
@@ -187,7 +319,11 @@ def replay_macro(comm, macro_name, page_file):
     path = os.path.join(comm, page_file)
     lines = []
     if os.path.exists(path):
-        lines = open(path).read().split('\n')
+        with open(path) as f:
+            content = f.read()
+        lines = content.split('\n')
+        create_version(comm, page_file, content, 'macro_pre')
+    
     for cmd in edit_macros[macro_name]:
         if cmd.startswith(':insert '):
             lines.append(cmd[8:].strip())
@@ -207,8 +343,11 @@ def replay_macro(comm, macro_name, page_file):
                         lines[idx] = parts[1]
                 except:
                     continue
+    
+    new_content = '\n'.join(lines)
     with open(path, 'w') as f:
-        f.write('\n'.join(lines))
+        f.write(new_content)
+    create_version(comm, page_file, new_content, 'macro_post')
     print(f'Macro "{macro_name}" applied to {page_file}.')
 
 def view_page(comm):
@@ -228,9 +367,7 @@ def view_page(comm):
         print("Page not found")
         return
     content_path = os.path.join(comm, page_file)
-    content_lines = open(content_path).read().split('\n')
-    # Automatically execute any @replay macros in the page
-    for i, line in enumerate(content_lines):
+    for line in open(content_path).read().split('\n'):
         if line.startswith('@replay '):
             replay_macro(comm, line[8:].strip(), page_file)
     with open(content_path) as f:
@@ -278,7 +415,7 @@ def manage_community():
         idx = names.index(choice)
     comm = communities[idx]
     while True:
-        print('1. Edit Page\n2. Rename Page\n3. View Page\n4. Replay Macro\n5. Export POSIX\n6. Back')
+        print('1. Edit Page\n2. Rename Page\n3. View Page\n4. Page Information\n5. Version History\n6. Restore Version\n7. Replay Macro\n8. Export POSIX\n9. Back')
         cmd = input('> ')
         if cmd == '1':
             edit_page(comm)
@@ -287,6 +424,54 @@ def manage_community():
         elif cmd == '3':
             view_page(comm)
         elif cmd == '4':
+            pages = list_pages(comm)
+            if not pages:
+                print("No pages available.")
+                continue
+            for i, p in enumerate(pages):
+                print(f'{i+1}. {p}')
+            choice = input("Select page for information: ").strip()
+            if choice.isdigit() and int(choice)-1 < len(pages):
+                page_file = pages[int(choice)-1]
+            elif choice in pages:
+                page_file = choice
+            else:
+                print("Page not found")
+                continue
+            show_page_info(comm, page_file)
+        elif cmd == '5':
+            pages = list_pages(comm)
+            if not pages:
+                print("No pages available.")
+                continue
+            for i, p in enumerate(pages):
+                print(f'{i+1}. {p}')
+            choice = input("Select page for version history: ").strip()
+            if choice.isdigit() and int(choice)-1 < len(pages):
+                page_file = pages[int(choice)-1]
+            elif choice in pages:
+                page_file = choice
+            else:
+                print("Page not found")
+                continue
+            view_version_history(comm, page_file)
+        elif cmd == '6':
+            pages = list_pages(comm)
+            if not pages:
+                print("No pages available.")
+                continue
+            for i, p in enumerate(pages):
+                print(f'{i+1}. {p}')
+            choice = input("Select page to restore version: ").strip()
+            if choice.isdigit() and int(choice)-1 < len(pages):
+                page_file = pages[int(choice)-1]
+            elif choice in pages:
+                page_file = choice
+            else:
+                print("Page not found")
+                continue
+            restore_version(comm, page_file)
+        elif cmd == '7':
             pages = list_pages(comm)
             if not pages:
                 print("No pages to apply macro.")
@@ -303,9 +488,9 @@ def manage_community():
                 continue
             macro_name = input("Enter macro name to replay: ").strip()
             replay_macro(comm, macro_name, page_file)
-        elif cmd == '5':
+        elif cmd == '8':
             export_posix(comm)
-        elif cmd == '6':
+        elif cmd == '9':
             break
 
 def main():

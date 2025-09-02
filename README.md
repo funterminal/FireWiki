@@ -1,0 +1,2 @@
+# FireWiki
+A Terminal Wiki 🔥

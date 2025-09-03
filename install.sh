@@ -33,10 +33,25 @@ install_pkg() {
 
 wget -O main.py https://raw.githubusercontent.com/funterminal/FireWiki/refs/heads/main/src/main.py
 
+# --- Ensure Python is installed ---
 if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
     install_pkg python3 || install_pkg python
 fi
 
+# --- Ensure pip is installed ---
+if ! command -v pip3 >/dev/null 2>&1 && ! command -v pip >/dev/null 2>&1; then
+    install_pkg python3-pip || install_pkg python-pip
+fi
+
+# --- Ensure readchar is installed ---
+if python3 -c "import readchar" >/dev/null 2>&1 || python -c "import readchar" >/dev/null 2>&1; then
+    echo "✅ Python package 'readchar' already installed."
+else
+    echo "📦 Installing Python package 'readchar'..."
+    pip3 install --user readchar || pip install --user readchar
+fi
+
+# --- Setup alias ---
 SHELL_NAME=$(basename "$SHELL")
 case "$SHELL_NAME" in
     bash) CONF_FILE="$HOME/.bashrc" ;;

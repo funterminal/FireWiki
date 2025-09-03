@@ -31,7 +31,7 @@ install_pkg() {
     esac
 }
 
-wget -O main.py https://raw.githubusercontent.com/funterminal/FireWiki/refs/heads/main/src/main.py
+wget -O firewiki.py https://raw.githubusercontent.com/funterminal/FireWiki/refs/heads/main/firewiki.py
 
 # --- Ensure Python is installed ---
 if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then

@@ -48,6 +48,22 @@ python3 firewiki.py
 - Change Tracking: Detailed operation tracking (edit, rename, macro, restore)
 - Version Browsing: View complete version history for any page
 
+##  ⌨️ Key Bindings & Navigation
+
+FireWiki features intuitive keyboard navigation throughout the entire interface:
+
+# Main Menu Navigation
+
+- Number Selection: Type numbers to select menu options quickly
+- Direct Input: Enter community names directly when prompted
+- Efficient Workflow: Minimal keystrokes required for common operations
+
+# Community Management
+
+- Menu-driven Interface: Clear numbered options for all operations
+- Quick Access: Fast navigation through community pages and features
+- Streamlined Editing: Efficient content creation and management
+
 ## Tagging System
 
 - Content Tagging: Add organizational tags to content with #tag syntax 
